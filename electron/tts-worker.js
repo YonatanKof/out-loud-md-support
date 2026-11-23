@@ -10,6 +10,7 @@ import ffmpegPath from "ffmpeg-static";
 import ESpeakNg from "espeak-ng";
 import { createWavBuffer } from "./shared-audio.js";
 import { splitLeadingPhonemes } from "./phoneme-split.js";
+import { prepareSpeechText } from "./markdown-for-speech.js";
 import { attachCrashLog, teeConsole, installProcessHandlers } from "./crash-log.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -649,7 +650,7 @@ async function ensureSession(model, acceleration) {
     return session;
 }
 function buildUnits(text) {
-    const segments = segmentText(sanitizeText(text));
+    const segments = segmentText(sanitizeText(prepareSpeechText(text)));
     const units = [];
     for (const segment of segments) {
         if (isSilenceMarker(segment)) {

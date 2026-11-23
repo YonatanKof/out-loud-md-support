@@ -28,6 +28,7 @@ export default {
         "electron/reader-recents.ts",
         "electron/telemetry.ts",
         "electron/telemetry-config.ts",
+        "electron/markdown-for-speech.ts",
         "scripts/*.mjs",
       ],
       project: ["electron/**/*.ts", "scripts/**/*.mjs"],
