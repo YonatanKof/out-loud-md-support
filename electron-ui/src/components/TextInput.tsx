@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
+import type { SpeechTextResult } from "@electron-shared/markdown-for-speech";
+import { sourceRangeForSpeechRange } from "@electron-shared/markdown-for-speech";
 import { track } from "../lib/analytics";
 
 // Pause tags the worker turns into silence (mirrors normalizePauseTags in
@@ -126,6 +128,10 @@ interface TextInputProps {
   onSpeak?: () => void;
   /** Ref to the underlying textarea so the app can refocus it (Esc hotkey). */
   inputRef?: React.RefObject<HTMLTextAreaElement>;
+  /** When markdown is spoken, chunk/highlight against this text instead of `value`. */
+  speechText?: string;
+  /** Source-index map for mapping speech chunks back onto `value` while highlighting. */
+  speechAlignment?: SpeechTextResult | null;
 }
 
 export function TextInput({
@@ -139,10 +145,13 @@ export function TextInput({
   exampleText,
   onSpeak,
   inputRef,
+  speechText,
+  speechAlignment,
 }: TextInputProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLSpanElement>(null);
-  const textChunks = useMemo(() => getTextChunks(value), [value]);
+  const chunkSource = speechAlignment?.isMarkdown && speechText ? speechText : value;
+  const textChunks = useMemo(() => getTextChunks(chunkSource), [chunkSource]);
 
   const showHighlight = highlightChunk && isPlaying && currentChunkIndex >= 0 && totalChunks > 0;
 
@@ -178,6 +187,15 @@ export function TextInput({
     ta.scrollTop = target;
     if (overlayRef.current) overlayRef.current.scrollTop = target;
   }, [highlightedTextChunkIndex, showHighlight, inputRef]);
+
+  const highlightedSourceRange = useMemo(() => {
+    if (!showHighlight || highlightedTextChunkIndex < 0 || !speechAlignment?.isMarkdown) {
+      return null;
+    }
+    const chunk = textChunks[highlightedTextChunkIndex];
+    if (!chunk) return null;
+    return sourceRangeForSpeechRange(speechAlignment, chunk.start, chunk.end);
+  }, [showHighlight, highlightedTextChunkIndex, speechAlignment, textChunks]);
 
   return (
     <div className="mb-4 flex min-h-0 flex-1 flex-col">
@@ -227,32 +245,39 @@ export function TextInput({
             aria-hidden="true"
           >
             {(() => {
-              // Build segments preserving all text including spaces between chunks
               const segments: { text: string; isHighlighted: boolean }[] = [];
-              let lastEnd = 0;
 
-              textChunks.forEach((chunk, i) => {
-                // Add text before this chunk (spaces, punctuation)
-                if (chunk.start > lastEnd) {
-                  segments.push({
-                    text: value.slice(lastEnd, chunk.start),
-                    isHighlighted: false,
-                  });
+              if (speechAlignment?.isMarkdown) {
+                if (highlightedSourceRange) {
+                  const { start, end } = highlightedSourceRange;
+                  if (start > 0) {
+                    segments.push({ text: value.slice(0, start), isHighlighted: false });
+                  }
+                  segments.push({ text: value.slice(start, end), isHighlighted: true });
+                  if (end < value.length) {
+                    segments.push({ text: value.slice(end), isHighlighted: false });
+                  }
+                } else {
+                  segments.push({ text: value, isHighlighted: false });
                 }
-                // Add the chunk itself
-                segments.push({
-                  text: value.slice(chunk.start, chunk.end),
-                  isHighlighted: i === highlightedTextChunkIndex,
+              } else {
+                let lastEnd = 0;
+                textChunks.forEach((chunk, i) => {
+                  if (chunk.start > lastEnd) {
+                    segments.push({
+                      text: value.slice(lastEnd, chunk.start),
+                      isHighlighted: false,
+                    });
+                  }
+                  segments.push({
+                    text: value.slice(chunk.start, chunk.end),
+                    isHighlighted: i === highlightedTextChunkIndex,
+                  });
+                  lastEnd = chunk.end;
                 });
-                lastEnd = chunk.end;
-              });
-
-              // Add any remaining text after last chunk
-              if (lastEnd < value.length) {
-                segments.push({
-                  text: value.slice(lastEnd),
-                  isHighlighted: false,
-                });
+                if (lastEnd < value.length) {
+                  segments.push({ text: value.slice(lastEnd), isHighlighted: false });
+                }
               }
 
               return segments.map((seg, i) => (

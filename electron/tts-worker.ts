@@ -11,6 +11,7 @@ import ESpeakNg from "espeak-ng";
 
 import { createWavBuffer } from "./shared-audio.js";
 import { splitLeadingPhonemes } from "./phoneme-split.js";
+import { prepareSpeechText } from "./markdown-for-speech.js";
 import { attachCrashLog, teeConsole, installProcessHandlers } from "./crash-log.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -776,7 +777,7 @@ interface SilenceUnit {
 type Unit = TextUnit | SilenceUnit;
 
 function buildUnits(text: string): Unit[] {
-  const segments = segmentText(sanitizeText(text));
+  const segments = segmentText(sanitizeText(prepareSpeechText(text)));
   const units: Unit[] = [];
   for (const segment of segments) {
     if (isSilenceMarker(segment)) {

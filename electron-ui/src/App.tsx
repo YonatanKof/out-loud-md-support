@@ -17,6 +17,7 @@ import { playClick } from "./lib/sound";
 import { track, lengthBucket } from "./lib/analytics";
 import { DEFAULT_TEXT } from "./constants";
 import iconUrl from "./assets/icon.png";
+import { markdownToSpeechText, type SpeechTextResult } from "@electron-shared/markdown-for-speech";
 
 // Set once we've shown the optional "leave your email" nudge, so it never
 // reappears for this install.
@@ -52,6 +53,15 @@ function App() {
   // value the user chose.
   const text = settings.text;
   const setText = useCallback((newText: string) => updateSetting("text", newText), [updateSetting]);
+  const [speechAlignment, setSpeechAlignment] = useState<SpeechTextResult | null>(null);
+
+  const speechForDisplay = useCallback((displayText: string) => {
+    const result = markdownToSpeechText(displayText);
+    return {
+      speakText: result.text,
+      alignment: result.isMarkdown ? result : null,
+    };
+  }, []);
 
   const getVolume = useCallback(() => settings.volume, [settings.volume]);
 
@@ -72,6 +82,10 @@ function App() {
 
   const player = useAudioPlayer(getVolume, onExported);
   const { setVolume } = player;
+
+  useEffect(() => {
+    if (!player.isPlaying && !player.isPaused) setSpeechAlignment(null);
+  }, [player.isPlaying, player.isPaused]);
 
   // Update player volume when slider changes
   useEffect(() => {
@@ -131,7 +145,9 @@ function App() {
       });
       lib.addSession(text, settings.voice, settings.language);
     }
-    player.play(text, settings.voice, settings.language);
+    const { speakText, alignment } = speechForDisplay(text);
+    setSpeechAlignment(alignment);
+    player.play(speakText, settings.voice, settings.language);
   };
 
   // Keyboard-driven "speak now": Enter (or ⌘/Ctrl+Enter) speaks the text;
@@ -147,8 +163,10 @@ function App() {
     });
     lib.addSession(text, settings.voice, settings.language);
     playClick();
-    player.play(text, settings.voice, settings.language, { forceRestart: true });
-  }, [text, settings.voice, settings.language, player, lib]);
+    const { speakText, alignment } = speechForDisplay(text);
+    setSpeechAlignment(alignment);
+    player.play(speakText, settings.voice, settings.language, { forceRestart: true });
+  }, [text, settings.voice, settings.language, player, lib, speechForDisplay]);
 
   // Text captured by the macOS "Read out loud" Service (works from any app):
   // drop it into the editor and speak it immediately.
@@ -177,40 +195,11 @@ function App() {
       });
       setText(t);
       lib.addSession(t, settings.voice, settings.language);
-      player.play(t, settings.voice, settings.language, { forceRestart: true });
+      const { speakText, alignment } = speechForDisplay(t);
+      setSpeechAlignment(alignment);
+      player.play(speakText, settings.voice, settings.language, { forceRestart: true });
     });
-  }, [settings.voice, settings.language, player, setText, lib]);
-
-  // Text captured by the macOS "Read out loud" Service: drop it into the
-  // editor and speak it immediately.
-  useEffect(() => {
-    const api = window.electronAPI;
-    if (!api?.onExternalSpeak) return;
-    return api.onExternalSpeak(({ text: incoming, source }) => {
-      // Copied selections (esp. from web pages) carry junk: hidden/zero-width
-      // chars, tabs, and block whitespace. Normalize to clean, speakable text.
-      const t = incoming
-        .replace(/\r\n?/g, "\n")
-        // eslint-disable-next-line no-control-regex -- strip control & zero-width chars from copied text
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u200B-\u200D\uFEFF]/g, "")
-        .replace(/[ \t]+/g, " ")
-        .replace(/[ \t]*\n[ \t]*/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-      if (!t) return;
-      // Track reads triggered outside the app window (macOS "Read out loud"
-      // Service) so usage of the feature is visible.
-      track("quick_speak_initiated", {
-        text_length_bucket: lengthBucket(t.length),
-        language: settings.language,
-        voice_id: settings.voice,
-        trigger_type: source === "service" ? "macos_service" : "external",
-      });
-      setText(t);
-      lib.addSession(t, settings.voice, settings.language);
-      player.play(t, settings.voice, settings.language, { forceRestart: true });
-    });
-  }, [settings.voice, settings.language, player, setText, lib]);
+  }, [settings.voice, settings.language, player, setText, lib, speechForDisplay]);
 
   // Drag-and-drop a file anywhere on the content → load its text into the editor.
   const onDrop = useCallback(
@@ -355,6 +344,8 @@ function App() {
                   exampleText={DEFAULT_TEXT}
                   onSpeak={speak}
                   inputRef={textareaRef}
+                  speechText={speechAlignment?.text}
+                  speechAlignment={speechAlignment}
                 />
                 <VoiceSelect
                   language={settings.language}
